@@ -1,0 +1,233 @@
+---
+title: "Lab 2"
+author: ""
+date: "Due on 02/17/23 at 11:59 pm"
+output: pdf_document
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(Lahman)
+library(tidyverse)
+library(retrosheet)
+```
+
+**Question 1** 
+
+  - Construct a data frame which includes the following variables from the \texttt{Teams} data frame in the \texttt{Lahman} package: \texttt{yearID}, \texttt{teamID}, \texttt{AB}, \texttt{SO}, \texttt{H}, \texttt{HR}, \texttt{R}, \texttt{RA}, \texttt{W}, and \texttt{L}. Only keep seasons dating back to 1990, and remove the 1994, 1995, and 2020 seasons. 
+  
+```{r question1}
+newTeams <- Teams %>%
+  select(yearID, teamID, AB, SO, H, HR, R, RA, W, L) %>%
+  filter(yearID >= "1990") %>%
+  filter(yearID != "1994") %>%
+  filter(yearID != "1995") %>%
+  filter(yearID != "2020")
+
+#852
+
+#question 1b
+bwar_bat = readr::read_csv("https://www.baseball-reference.com/data/war_daily_bat.txt", na = "NULL")
+bwar_pit = readr::read_csv("https://www.baseball-reference.com/data/war_daily_pitch.txt", na = "NULL")  
+
+bwar_bat <- bwar_bat %>%
+  filter(year_ID >= "1990") %>%
+  filter(year_ID != "1994") %>%
+  filter(year_ID != "1995") %>%
+  filter(year_ID != "2020") %>%
+  filter(year_ID != "2022")
+
+bwar_pit <- bwar_pit %>%
+  filter(year_ID >= "1990") %>%
+  filter(year_ID != "1994") %>%
+  filter(year_ID != "1995") %>%
+  filter(year_ID != "2020") %>%
+  filter(year_ID != "2022")
+
+WARdef_pull <- bwar_bat %>%
+  select(name_common, team_ID, year_ID, WAR_def)
+#40291
+
+#need to groupby(team_ID, year_ID)
+BRruns_pull <- bwar_bat %>%
+  select(name_common, team_ID, year_ID, runs_br)
+#40291
+bullpen_war_pull <- bwar_pit %>%
+  select(team_ID, year_ID, IPouts,
+         IPouts_relief, WAR) %>%
+  filter((IPouts_relief/ IPouts) >= 0.75)
+#12298
+
+teamdWAR <- WARdef_pull %>%
+  group_by(year_ID, team_ID) %>%
+  na.omit(WAR_def) %>%
+  summarise(dWAR = sum(WAR_def))
+  
+teamBRruns <- BRruns_pull %>%
+  group_by(year_ID, team_ID)  %>%
+  summarise(BRruns = sum(runs_br))
+
+teamPenWAR <- bullpen_war_pull %>%
+  group_by(year_ID, team_ID) %>%
+  summarise(penWAR = sum(WAR))
+
+teamPenWAR$penWAR <- round(teamPenWAR$penWAR ,digits = 2)
+teamBRruns$BRruns <- round(teamBRruns$BRruns ,digits = 2)
+teamdWAR$dWAR <- round(teamdWAR$dWAR ,digits = 2)
+#need to figure out all the rounding stuff
+
+#question 1c 
+
+newTeams$teamID <- str_replace(newTeams$teamID, "CHA", "CHW")
+newTeams[newTeams == "CHN"] <- "CHC"
+newTeams[newTeams == "KCA"] <- "KCR"
+newTeams[newTeams == "LAN"] <- "LAD"
+newTeams[newTeams == "ML4"] <- "MIL"
+newTeams[newTeams == "NYA"] <- "NYY"
+newTeams[newTeams == "NYN"] <- "NYM"
+newTeams[newTeams == "SDN"] <- "SDP"
+newTeams[newTeams == "SFN"] <- "SFG"
+newTeams[newTeams == "TBA"] <- "TBR"
+newTeams[newTeams == "WAS"] <- "WSN"
+newTeams[newTeams == "FLO"] <- "FLA"
+newTeams$teamID <- str_replace(newTeams$teamID, "SLA", "STL")
+
+teams <- newTeams %>%
+  group_by(yearID, teamID)
+
+newTeams <- cbind(teams, teamdWAR$dWAR, teamBRruns$BRruns, teamPenWAR$penWAR)
+
+colnames(newTeams)[colnames(newTeams) == "...11"] ="dWAR"
+colnames(newTeams)[colnames(newTeams) == "...12"] ="BRruns"
+colnames(newTeams)[colnames(newTeams) == "...13"] ="penWAR"
+
+
+#question 1d
+newTeams <- newTeams %>%
+  mutate(RD = R - RA)
+
+#Compute and add winning percentage \texttt{Wpct} to your data frame. Use an equation in your notes and linear regression to compute the optimal $k$ so that \texttt{Wpct} is well-explained by \texttt{Wpytk} = $R^k/(R^k + RA^k)$. Add \texttt{Wpytk} and \texttt{residuals\_pytk = Wpct - Wpytk} to your data frame. 
+
+#question 1e
+
+q1e <- newTeams %>%
+  mutate(Wpct = W / (W + L))
+
+dat_aug <- newTeams %>% 
+  mutate(logWratio = log(W / L), 
+         logRratio = log(R / RA))
+
+pyFit <- lm(logWratio ~ 0 + logRratio, data = dat_aug)
+pyFit
+
+
+#Display the rows of this data frame corresponding to the 2014-2015 Royals seasons.
+
+royals <- dat_aug %>%
+  filter(yearID == "2014" | yearID == "2015") %>%
+  filter(teamID == "KCR")
+
+```
+
+**Question 2** In this problem we will perform analyses that investigate strengths and peculiarities of the 2014-2015 Royals. Do the following:
+
+  - Fit and analyze a regression model of \texttt{residuals\_pytk} on \texttt{penWAR}. Determine how many wins one would expect the Royals to obtain above their Pythagorean expectations on the basis of their bullpen.
+  
+```{r question2}
+
+dat_aug <- dat_aug %>% 
+  mutate(Wpct = W / (W + L)) %>%
+  mutate(Wpct_pyt = R^2 / (R^2 + RA^2)) %>%
+  mutate(residuals_pytk = Wpct - Wpct_pyt)
+
+m3 <- lm(penWAR ~ 0 + Wpct_pyt, data = dat_aug)
+m3
+
+
+
+
+0.02991 *162
+
+#The Royals' bullpen WAR outpaced their Pythagorean wins by 4.85 wins, on average.
+
+```
+
+  
+
+**Question 3** Do the following: 
+
+  - Select a period of your choice (at least 20 years) and fit the Pythagorean formula model (after finding the optimal exponent) to the run-differential, win-loss data.
+  
+```{r question3a}
+q3a <- dat_aug %>%
+  filter (yearID >= "2000") %>%
+  mutate(logWLratio = log(W/L),
+         logRDratio = log(R/RA))
+
+fitted <- lm(logWLratio ~ 0 + logRDratio, data = q3a)
+fitted
+
+q3a <- q3a %>%
+  mutate(W_pyt = (W ^ 1.845 / (W ^ 1.845 + L ^ 1.845)) *162 )  %>%
+  mutate(RD_pyt = (R ^ 1.845 / (R ^ 1.845 + RA ^ 1.845)) *162 ) %>%
+  mutate(RD_resid = RD - RD_pyt) %>%
+  mutate(W_resid = W - W_pyt)
+```  
+  
+  - On the basis of your fit in the previous part and the list of managers obtained from Retrosheet, compile a top 10 list of managers who most overperformed their Pythagorean winning percentage and a top 10 list of managers who most underperformed their Pythagorean winning percentage.
+
+```{r underperformingmanagers}
+
+#underperforming managers
+underperform <- q3a[order(q3a$W_resid), ]
+head(underperform, 10)
+```
+Managers:
+2001 Seattle: pinielo01 & mclarjo99
+2018 Boston: coraal01
+2019 Houston: hinchaj01
+2021 San Francisco: kaplega01
+2019 Los Angeles Dodgers: roberda07
+2021 Los Angeles Dodgers: roberda07
+2004 St. Louis: larusto01
+2002 New York Yankees: torrejo01
+2016 Chicago Cubs: maddojo99
+2002 Atlanta: coxbo01
+```{r overperformingmanagers}
+#overperforming managers
+
+overperform <- q3a[order(-q3a$W_resid), ]
+head(overperform, 10)
+```
+Managers: 
+2003 Detroit: trammal01
+2018 Baltimore: showabu99
+2019 Detroit: gardero01
+2004 Arizona: brenlbo01 & pedrial01
+2013 Houston: portebo03
+2021 Arizona: lovulto01
+2021 Baltimore: hydebr99
+2019 Baltimore: hydebr99
+2012 Houston: millsbr01 & defrato99
+2002 Milwaukee: lopesda01 & roystje01
+**Question 4** The first question on page 21 in Section 1.4.3 of Analyzing Baseball Data with R.   
+  
+ - During the McGwire/Sosa home run race, which player was more successful at hitting homers with men on base?
+ 
+Mark McGwire hit 37 home runs in 313 plate appearances with runners on base, while Sammy Sosa hit 29 in 367. Once walks (both intentional and unintentional) and hit by pitches are removed, the number of opportunities become 223 for McGwire and 317 for Sosa.
+
+```{r question4a}
+#fields <- Batting %>%
+#fields <- read.csv("fields.csv")
+
+#I am very stressed and confused
+#I think we'll end up needing year-by-year data, similar to the dataset we worked on in class
+
+```
+
